@@ -1,0 +1,3 @@
+-- Optional seed (run after creating an auth user via dashboard or app).
+-- Promote a user to admin:
+--   update public.profiles set role='admin' where email='you@example.com';
