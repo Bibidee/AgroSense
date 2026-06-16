@@ -2,6 +2,7 @@ import Link from "next/link";
 import { supabaseServer } from "@/lib/supabase/server";
 import { AppShell } from "@/components/AppShell";
 import { VerdictCapsule } from "@/components/VerdictCapsule";
+import { VerdictRotator } from "@/components/VerdictRotator";
 import { GenLayerConsensusPanel } from "@/components/GenLayerConsensusPanel";
 import { WeatherRiskOrb } from "@/components/WeatherRiskOrb";
 import { SignalStrip } from "@/components/SignalStrip";
@@ -21,8 +22,9 @@ export default async function DashboardPage() {
   const { data: cases } = await sb.from("advisory_cases")
     .select("id,crop_type,status,created_at,decision_type").eq("user_id", userId)
     .order("created_at", { ascending: false }).limit(8);
-  const { data: latest } = await sb.from("genlayer_verdicts")
-    .select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const { data: verdictList } = await sb.from("genlayer_verdicts")
+    .select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(8);
+  const latest = verdictList?.[0] ?? null;
   const { data: activity } = await sb.from("contract_activity_logs")
     .select("action,status,transaction_hash,created_at").eq("user_id", userId)
     .order("created_at", { ascending: false }).limit(5);
@@ -35,7 +37,7 @@ export default async function DashboardPage() {
 
         <div className="grid grid-cols-12 gap-5">
           <div className="col-span-12 lg:col-span-7">
-            <VerdictCapsule v={latest} status={latest ? "consensus_reached" : "not_submitted"} />
+            <VerdictRotator verdicts={verdictList ?? []} />
           </div>
           <div className="col-span-12 sm:col-span-6 lg:col-span-2"><WeatherRiskOrb /></div>
           <div className="col-span-12 sm:col-span-6 lg:col-span-3">
