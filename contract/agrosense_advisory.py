@@ -130,7 +130,11 @@ class AgroSenseAdvisory(gl.Contract):
             "\n\nATTACHED EVIDENCE DOCUMENTS:\n" + document_summary
         )
 
-        # ---------- Stage 1: action token (strict consensus) ----------
+        # ---------- Stage 1: action token (comparative consensus) ----------
+        # prompt_comparative is used because LLM outputs are non-deterministic;
+        # strict_eq would fail whenever two validators phrase the token differently.
+        # The principle enforces that only byte-for-byte identical tokens are
+        # considered equivalent, so the comparative LLM still acts as a strict gate.
         token_prompt = (
             "You are an independent agricultural advisory validator.\n\n"
             "Case:\n" + case_json + evidence_section + "\n\n"
@@ -150,7 +154,17 @@ class AgroSenseAdvisory(gl.Contract):
             raw = gl.nondet.exec_prompt(token_prompt)
             return _canon(raw)
 
-        agreed_token = gl.eq_principle.strict_eq(token_callback)
+        token_principle = (
+            "Both outputs must be EXACTLY the same string with no differences. "
+            "Each must be one of: plant_now, delay_planting, irrigate_first, "
+            "proceed_with_caution, avoid_action, request_more_evidence. "
+            "Any difference whatsoever — even whitespace — is NOT acceptable."
+        )
+
+        agreed_token = gl.eq_principle.prompt_comparative(
+            token_callback, principle=token_principle
+        )
+        agreed_token = _canon(agreed_token)
         if agreed_token not in CANONICAL_VERDICTS:
             agreed_token = "request_more_evidence"
 
