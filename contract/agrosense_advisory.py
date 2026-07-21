@@ -1,4 +1,4 @@
-# v0.3.0
+# v0.4.0
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 
 from genlayer import *
@@ -98,18 +98,7 @@ class AgroSenseAdvisory(gl.Contract):
         backend_proposed_plan_c: str,
     ) -> str:
 
-        # ------ Fetch the evidence manifest (nondeterministic web call) ------
-        def fetch_manifest() -> str:
-            try:
-                resp = gl.nondet.web.get(evidence_manifest_url)
-                return resp.body.decode("utf-8")
-            except Exception:
-                return "{}"
-
-        manifest_json = gl.eq_principle.strict_eq(fetch_manifest)
-        document_summary = _summarise_documents(manifest_json)
-
-        # ------ Build the full case packet for prompts ------
+        # ------ Build deterministic case packet (no I/O here) ------
         case = {
             "advisory_id": advisory_id,
             "farm_region": farm_region,
@@ -126,89 +115,85 @@ class AgroSenseAdvisory(gl.Contract):
         }
         case_json = json.dumps(case, indent=2, sort_keys=True)
 
-        evidence_section = (
-            "\n\nATTACHED EVIDENCE DOCUMENTS:\n" + document_summary
+        # ------ All nondeterministic work in a single leader function ------
+        # Nested exactly one call-frame deep from submit_advisory so the web
+        # fetch and both LLM calls run as one unit.  A single
+        # prompt_comparative judgment replaces the three separate consensus
+        # rounds that existed in v0.3.0.
+        def leader_fn() -> str:
+            # 1. Fetch the evidence manifest
+            try:
+                resp = gl.nondet.web.get(evidence_manifest_url)
+                manifest_json = resp.body.decode("utf-8")
+            except Exception:
+                manifest_json = "{}"
+
+            document_summary = _summarise_documents(manifest_json)
+            evidence_section = "\n\nATTACHED EVIDENCE DOCUMENTS:\n" + document_summary
+
+            # 2. Verdict token
+            token_raw = gl.nondet.exec_prompt(
+                "You are an independent agricultural advisory validator.\n\n"
+                "Case:\n" + case_json + evidence_section + "\n\n"
+                "Choose the MOST DEFENSIBLE single action for the next 7-14 days "
+                "from this enum. Return EXACTLY one token, lowercase, no other "
+                "characters:\n\n"
+                "  plant_now\n"
+                "  delay_planting\n"
+                "  irrigate_first\n"
+                "  proceed_with_caution\n"
+                "  avoid_action\n"
+                "  request_more_evidence\n\n"
+                "Output: only the token. No prose, no JSON, no punctuation."
+            )
+            token = _canon(token_raw)
+
+            # 3. Reasoning (uses token from step 2)
+            reason_raw = gl.nondet.exec_prompt(
+                "The agreed advisory action is: " + token + ".\n\n"
+                "Case:\n" + case_json + evidence_section + "\n\n"
+                "Produce a concise JSON object describing the verdict. Use these "
+                "exact keys:\n"
+                "{\n"
+                '  "risk_level": "<low|moderate|high>",\n'
+                '  "confidence": "<weak|moderate|strong>",\n'
+                '  "selected_plan": "<A|B|C>",\n'
+                '  "reasoning": "<1-2 sentences explaining why '
+                + token + ' is most defensible>"\n'
+                "}\n\n"
+                "Return only JSON. Wording of reasoning may vary; content must "
+                "defend the agreed action."
+            )
+
+            return json.dumps(
+                {"token": token, "reasoning_raw": reason_raw.strip()},
+                sort_keys=True,
+            )
+
+        principle = (
+            "Both outputs must be JSON objects with matching 'token' fields. "
+            "The token must be exactly one of: plant_now, delay_planting, "
+            "irrigate_first, proceed_with_caution, avoid_action, "
+            "request_more_evidence. "
+            "The 'reasoning_raw' fields must both defend the same token; "
+            "minor wording differences are acceptable, but different tokens are not."
         )
 
-        # ---------- Stage 1: action token (comparative consensus) ----------
-        # prompt_comparative is used because LLM outputs are non-deterministic;
-        # strict_eq would fail whenever two validators phrase the token differently.
-        # The principle enforces that only byte-for-byte identical tokens are
-        # considered equivalent, so the comparative LLM still acts as a strict gate.
-        token_prompt = (
-            "You are an independent agricultural advisory validator.\n\n"
-            "Case:\n" + case_json + evidence_section + "\n\n"
-            "Choose the MOST DEFENSIBLE single action for the next 7-14 days "
-            "from this enum. Return EXACTLY one token, lowercase, no other "
-            "characters:\n\n"
-            "  plant_now\n"
-            "  delay_planting\n"
-            "  irrigate_first\n"
-            "  proceed_with_caution\n"
-            "  avoid_action\n"
-            "  request_more_evidence\n\n"
-            "Output: only the token. No prose, no JSON, no punctuation."
-        )
+        result_raw = gl.eq_principle.prompt_comparative(leader_fn, principle=principle)
 
-        def token_callback() -> str:
-            raw = gl.nondet.exec_prompt(token_prompt)
-            return _canon(raw)
+        try:
+            result = json.loads(result_raw)
+        except Exception:
+            result = {}
 
-        token_principle = (
-            "Both outputs must be EXACTLY the same string with no differences. "
-            "Each must be one of: plant_now, delay_planting, irrigate_first, "
-            "proceed_with_caution, avoid_action, request_more_evidence. "
-            "Any difference whatsoever — even whitespace — is NOT acceptable."
-        )
-
-        agreed_token = gl.eq_principle.prompt_comparative(
-            token_callback, principle=token_principle
-        )
-        agreed_token = _canon(agreed_token)
+        agreed_token = _canon(result.get("token", ""))
         if agreed_token not in CANONICAL_VERDICTS:
             agreed_token = "request_more_evidence"
 
-        # ---------- Stage 2: reasoning + risk + confidence (relaxed) ----------
-        reason_prompt = (
-            "The agreed advisory action is: " + agreed_token + ".\n\n"
-            "Case:\n" + case_json + evidence_section + "\n\n"
-            "Produce a concise JSON object describing the verdict. Use these "
-            "exact keys:\n"
-            "{\n"
-            '  "risk_level": "<low|moderate|high>",\n'
-            '  "confidence": "<weak|moderate|strong>",\n'
-            '  "selected_plan": "<A|B|C>",\n'
-            '  "reasoning": "<1-2 sentences explaining why '
-            + agreed_token + ' is most defensible>"\n'
-            "}\n\n"
-            "Return only JSON. Wording of reasoning may vary; content must "
-            "defend the agreed action."
-        )
-
-        def reason_callback() -> str:
-            return gl.nondet.exec_prompt(reason_prompt).strip()
-
-        principle = (
-            "Both outputs must be JSON objects with keys risk_level, "
-            "confidence, selected_plan, and reasoning. The reasoning field "
-            "must justify the action '" + agreed_token + "'. Minor wording "
-            "differences are acceptable; substantive disagreement on the "
-            "action is not."
-        )
-
-        agreed_reason_raw = gl.eq_principle.prompt_comparative(
-            reason_callback, principle=principle
-        )
-
         try:
-            parsed = json.loads(agreed_reason_raw)
+            parsed = json.loads(result.get("reasoning_raw", "{}"))
         except Exception:
-            parsed = {
-                "risk_level": "moderate",
-                "confidence": "moderate",
-                "selected_plan": "B",
-                "reasoning": (agreed_reason_raw or "")[:280],
-            }
+            parsed = {}
 
         stored = {
             "advisory_id": advisory_id,
