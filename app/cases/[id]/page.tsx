@@ -1,3 +1,6 @@
+// GenLayer consensus can take 2-3 minutes; extend the Vercel function timeout.
+export const maxDuration = 300;
+
 import { redirect } from "next/navigation";
 import { supabaseServer } from "@/lib/supabase/server";
 import { AppShell } from "@/components/AppShell";

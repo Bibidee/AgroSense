@@ -97,19 +97,19 @@ export async function submitAdvisoryToGenLayer(
   });
   if (!txHash || typeof txHash !== "string") throw new Error("GenLayer write returned no transaction hash");
 
-  try { await client.waitForTransactionReceipt({ hash: txHash, retries: { count: 30, interval: 4000 } }); }
+  try { await client.waitForTransactionReceipt({ hash: txHash, retries: { count: 20, interval: 5000 } }); }
   catch { /* Studio may not implement receipts uniformly; continue */ }
 
-  // Read verdict with a short poll. Up to 6 attempts spaced 5s apart.
+  // Read verdict with a poll. Up to 20 attempts spaced 6s apart (~2 min).
   let raw: any = null;
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 20; i++) {
     try {
       raw = await client.readContract({
         address: CONTRACT, functionName: "get_verdict", args: [packet.advisoryId],
       });
       if (isVerdictReady(raw)) break;
     } catch { /* keep retrying */ }
-    await new Promise(r => setTimeout(r, 5000));
+    await new Promise(r => setTimeout(r, 6000));
   }
   const v = toObj(raw) ?? {};
   const ready = isVerdictReady(raw);
