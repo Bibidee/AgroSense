@@ -1,4 +1,4 @@
-# v0.4.0
+# v0.5.0
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 
 from genlayer import *
@@ -132,19 +132,34 @@ class AgroSenseAdvisory(gl.Contract):
             evidence_section = "\n\nATTACHED EVIDENCE DOCUMENTS:\n" + document_summary
 
             # 2. Verdict token
+            # Tie-breaking rules are explicit so validators converge on the
+            # same token even when multiple options are defensible.
             token_raw = gl.nondet.exec_prompt(
                 "You are an independent agricultural advisory validator.\n\n"
                 "Case:\n" + case_json + evidence_section + "\n\n"
-                "Choose the MOST DEFENSIBLE single action for the next 7-14 days "
-                "from this enum. Return EXACTLY one token, lowercase, no other "
-                "characters:\n\n"
+                "Choose exactly one token from the list below for the next 7-14 days.\n\n"
+                "DECISION RULES — apply in order, stop at the first match:\n"
+                "1. If critical disease, pest, or flood risk is present → avoid_action\n"
+                "2. If soil moisture or irrigation data is missing and the question cannot "
+                "be answered confidently → request_more_evidence\n"
+                "3. If soil/field data explicitly shows moisture is BELOW the minimum "
+                "threshold for germination AND no rainfall is forecast within 7 days "
+                "→ irrigate_first\n"
+                "4. If conditions are borderline but rainfall IS forecast within 7 days "
+                "OR subsoil moisture is adequate → proceed_with_caution\n"
+                "5. If topsoil moisture is clearly insufficient AND no rain forecast "
+                "within 7 days AND no irrigation available → delay_planting\n"
+                "6. If moisture, temperature, and timing are all clearly favourable "
+                "→ plant_now\n\n"
+                "TOKENS:\n"
                 "  plant_now\n"
                 "  delay_planting\n"
                 "  irrigate_first\n"
                 "  proceed_with_caution\n"
                 "  avoid_action\n"
                 "  request_more_evidence\n\n"
-                "Output: only the token. No prose, no JSON, no punctuation."
+                "Output: only the single matching token, lowercase. "
+                "No prose, no JSON, no punctuation."
             )
             token = _canon(token_raw)
 
@@ -171,12 +186,15 @@ class AgroSenseAdvisory(gl.Contract):
             )
 
         principle = (
-            "Both outputs must be JSON objects with matching 'token' fields. "
-            "The token must be exactly one of: plant_now, delay_planting, "
-            "irrigate_first, proceed_with_caution, avoid_action, "
-            "request_more_evidence. "
-            "The 'reasoning_raw' fields must both defend the same token; "
-            "minor wording differences are acceptable, but different tokens are not."
+            "Both outputs must be JSON objects whose 'token' fields represent the "
+            "same advisory direction. Exact token match is preferred. The only "
+            "acceptable near-match is proceed_with_caution vs plant_now (both mean "
+            "go ahead) or proceed_with_caution vs delay_planting (both mean caution) "
+            "— in those cases treat them as equivalent and accept the output. "
+            "Any other token mismatch (e.g. plant_now vs delay_planting, or "
+            "irrigate_first vs avoid_action) is NOT acceptable. "
+            "The 'reasoning_raw' fields must both defend a cautious or consistent "
+            "advisory direction; minor wording differences are fine."
         )
 
         result_raw = gl.eq_principle.prompt_comparative(leader_fn, principle=principle)
