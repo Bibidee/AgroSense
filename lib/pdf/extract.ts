@@ -34,9 +34,10 @@ export async function extractPdfText(buf: Buffer): Promise<string> {
     // file tracer includes it in the function bundle. pdfjs checks
     // globalThis.pdfjsWorker.WorkerMessageHandler first; if set, it skips its
     // own runtime dynamic import (which can't resolve after bundling).
+    // @ts-ignore — no types for worker module
     const pdfjsWorker = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (globalThis as any).pdfjsWorker = pdfjsWorker;
+    // @ts-ignore — pdfjs checks globalThis.pdfjsWorker.WorkerMessageHandler
+    globalThis.pdfjsWorker = pdfjsWorker;
 
     const { PDFParse } = await import("pdf-parse");
     const parser = new PDFParse({ data: buf });

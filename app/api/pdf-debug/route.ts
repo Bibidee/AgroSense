@@ -44,6 +44,7 @@ export async function GET() {
 
     // Pre-load worker so pdfjs uses globalThis.pdfjsWorker instead of string-import
     try {
+      // @ts-ignore — no types for worker module
       const w = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
       (globalThis as any).pdfjsWorker = w;
       log.push(`worker loaded, keys: ${Object.keys(w).join(",")}`);
