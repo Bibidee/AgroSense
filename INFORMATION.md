@@ -80,7 +80,7 @@ The finalised verdict is stored on-chain and mirrored to Supabase for fast UI re
 | Database & Auth | Supabase (Postgres + Row Level Security + Storage) |
 | PDF extraction | `pdf-parse` (Node.js, server-side on upload) |
 | On-chain AI | GenLayer StudioNet |
-| Intelligent Contract | Python (`genlayer` SDK) — v0.5.0 |
+| Intelligent Contract | Python (`genlayer` SDK) — v0.2.17 |
 | Deployment | Vercel (function timeout extended to 300s for consensus wait) |
 
 ---
@@ -155,7 +155,7 @@ GenLayer StudioNet
 ## Contract Reference
 
 **File:** `contract/agrosense_advisory.py`  
-**Version:** v0.5.0  
+**Version:** v0.2.17  
 **Network:** GenLayer StudioNet  
 **Address:** `0x79d68980436D96Ee489C3b1786A739E2EE41BC73`
 
