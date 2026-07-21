@@ -16,7 +16,7 @@ Set as `WALLET_KDF_PEPPER` (server only). Rotating this invalidates existing wra
 
 ## 3. GenLayer
 - `AgroSenseAdvisory` is deployed on StudioNet at:
-  **`0x018282942fea51E249Df8C37D9CB66bc642CD8eC`**
+  **`0x42F6b64A948BbB2E9eBD57919e07fB286A6D291F`**
 - This address is hard-wired in [`lib/genlayer/contract.ts`](lib/genlayer/contract.ts)
   and pre-filled in `.env.local` / `.env.example`. To redeploy, update both.
 - Still required: `GENLAYER_RPC_URL`, `GENLAYER_SUBMITTER_PRIVATE_KEY`.
