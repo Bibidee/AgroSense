@@ -37,7 +37,7 @@ This returns the soil evidence hash plus every attached document's name, MIME ty
 
 ### 4. GenLayer Adjudication (Single-Round Consensus)
 
-The `AgroSenseAdvisory` Intelligent Contract (v0.5.0) runs on GenLayer StudioNet. All nondeterministic work happens inside one `leader_fn`, wrapped in a single `prompt_comparative` call:
+The `AgroSenseAdvisory` Intelligent Contract (v0.2.17) runs on GenLayer StudioNet. All nondeterministic work happens inside one `leader_fn`, wrapped in a single `prompt_comparative` call:
 
 **Inside `leader_fn` (one execution unit per validator):**
 
@@ -78,7 +78,7 @@ The finalised verdict is stored on-chain and mirrored to Supabase for fast UI re
 |---|---|
 | Frontend | Next.js 15 (App Router, Server Actions) |
 | Database & Auth | Supabase (Postgres + Row Level Security + Storage) |
-| PDF extraction | `pdf-parse` (Node.js, server-side on upload) |
+| PDF extraction | `pdf-parse` v2 + `pdfjs-dist` (Node.js, server-side on upload and on-demand via fallback) |
 | On-chain AI | GenLayer StudioNet |
 | Intelligent Contract | Python (`genlayer` SDK) — v0.2.17 |
 | Deployment | Vercel (function timeout extended to 300s for consensus wait) |
@@ -149,6 +149,24 @@ GenLayer StudioNet
 - **Verdicts are on-chain** — Supabase cannot be edited to change a verdict; the contract is the source of truth
 - **Embedded wallet keys** are generated client-side during onboarding. The platform never stores raw private keys — only an encrypted wrap, decrypted at signing time with the user's password
 - **Evidence integrity** — each document's SHA-256 is included in the manifest; validators can verify file integrity against the hash stored on-chain in the evidence digest
+
+---
+
+## PDF Extraction — Implementation Notes
+
+PDF text extraction runs server-side using `pdf-parse` v2 (which wraps `pdfjs-dist/legacy`). Vercel's serverless runtime required three fixes to make this work:
+
+1. **Lazy import** — `pdf-parse` is imported with `await import("pdf-parse")` inside the function body, not at the module top level. A static top-level import crashed the entire route on load in Vercel's bundled environment.
+
+2. **DOMMatrix polyfill** — `pdfjs-dist` references `DOMMatrix` (a browser Canvas API) at module level for rendering setup. Node.js / Vercel serverless does not provide it. A minimal stub is set on `globalThis` before any pdfjs import so the worker module loads without throwing.
+
+3. **Worker pre-load + `serverExternalPackages`** — pdfjs uses a "fake worker" in Node.js that dynamically imports its worker file via a runtime string. After Next.js bundles server code, that string can no longer resolve. The fix: `pdf-parse` and `pdfjs-dist` are listed in `serverExternalPackages` so they remain as real `node_modules` (not bundled), and the worker module is pre-loaded with a static import string (`await import("pdfjs-dist/legacy/build/pdf.worker.mjs")`) and attached to `globalThis.pdfjsWorker` so pdfjs finds it directly.
+
+**Extraction happens twice:**
+- **On upload** — `uploadEvidence()` server action extracts text immediately and stores it in `evidence_files.extracted_text`
+- **On manifest fetch** — if `extracted_text` is blank (e.g. files uploaded before the fix), `/api/evidence/[caseId]` re-downloads the PDF from Supabase storage, extracts the text, and backfills the DB row
+
+**Live proof — TX `0xa224ab…ee65ee` (July 22 2026):** Cowpea assessment PDF uploaded, manifest returned full extracted text, GenLayer validators read soil moisture data (14.8% topsoil, 17.2% subsoil) and the word "FAVOURABLE" from the PDF, and reached consensus on `plant_now` in a single round on StudioNet.
 
 ---
 
