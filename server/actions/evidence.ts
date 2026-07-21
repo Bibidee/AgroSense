@@ -2,17 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { supabaseServer } from "@/lib/supabase/server";
 import { sha256Hex } from "@/lib/util/hash";
-
-async function extractPdfText(buf: Buffer): Promise<string> {
-  try {
-    const mod = await import("pdf-parse");
-    const pdfParse = (mod as any).default ?? mod;
-    const result = await pdfParse(buf);
-    return (result.text ?? "").trim();
-  } catch {
-    return "";
-  }
-}
+import { extractPdfText } from "@/lib/pdf/extract";
 
 const MAX_BY_TYPE: Record<string, number> = {
   "image/jpeg": 2 * 1024 * 1024,
