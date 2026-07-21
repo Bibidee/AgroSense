@@ -1,4 +1,4 @@
-# v0.2.17 
+# v0.3.0
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 
 from genlayer import *
@@ -19,24 +19,47 @@ CANONICAL_VERDICTS = (
 
 def _canon(text: str) -> str:
     t = (text or "").lower().strip()
-    # Exact token match
     for token in CANONICAL_VERDICTS:
         if token in t:
             return token
-    # Fuzzy fallbacks
-    if "request" in t or "more evidence" in t:         return "request_more_evidence"
-    if "avoid" in t:                                   return "avoid_action"
-    if "irrigat" in t:                                 return "irrigate_first"
-    if "delay" in t or "wait" in t or "postpone" in t: return "delay_planting"
-    if "caution" in t or "monitor" in t:               return "proceed_with_caution"
-    if "plant" in t or "proceed" in t:                 return "plant_now"
+    if "request" in t or "more evidence" in t:          return "request_more_evidence"
+    if "avoid" in t:                                     return "avoid_action"
+    if "irrigat" in t:                                   return "irrigate_first"
+    if "delay" in t or "wait" in t or "postpone" in t:  return "delay_planting"
+    if "caution" in t or "monitor" in t:                 return "proceed_with_caution"
+    if "plant" in t or "proceed" in t:                   return "plant_now"
     return "request_more_evidence"
 
 
+def _summarise_documents(manifest_json: str) -> str:
+    """
+    Parse the evidence manifest and return a readable summary of every
+    document's extracted text.  Falls back gracefully on bad JSON.
+    """
+    try:
+        manifest = json.loads(manifest_json)
+    except Exception:
+        return "(evidence manifest could not be parsed)"
+
+    docs = manifest.get("documents", [])
+    if not docs:
+        return "(no documents attached)"
+
+    parts = []
+    for doc in docs:
+        name = doc.get("name", "unknown")
+        text = (doc.get("extracted_text") or "").strip()
+        sha  = (doc.get("sha256") or "")[:16]
+        if text:
+            parts.append(f"--- {name} (sha256:{sha}...) ---\n{text[:3000]}")
+        else:
+            parts.append(f"--- {name} (sha256:{sha}...) --- [binary / no text extracted]")
+
+    return "\n\n".join(parts)
+
+
 class AgroSenseAdvisory(gl.Contract):
-    # advisory_id -> json struct stored on-chain
-    verdicts: TreeMap[str, str]
-    # advisory_id -> submitter address (string form)
+    verdicts:  TreeMap[str, str]
     submitted: TreeMap[str, str]
 
     def __init__(self) -> None:
@@ -68,12 +91,25 @@ class AgroSenseAdvisory(gl.Contract):
         weather_url: str,
         market_url: str,
         soil_evidence_hash: str,
-        uploaded_evidence_hash: str,
+        evidence_manifest_url: str,
         user_observation_text: str,
         backend_proposed_plan_a: str,
         backend_proposed_plan_b: str,
         backend_proposed_plan_c: str,
     ) -> str:
+
+        # ------ Fetch the evidence manifest (nondeterministic web call) ------
+        def fetch_manifest() -> str:
+            try:
+                resp = gl.nondet.web.get(evidence_manifest_url)
+                return resp.body.decode("utf-8")
+            except Exception:
+                return "{}"
+
+        manifest_json = gl.eq_principle.strict_eq(fetch_manifest)
+        document_summary = _summarise_documents(manifest_json)
+
+        # ------ Build the full case packet for prompts ------
         case = {
             "advisory_id": advisory_id,
             "farm_region": farm_region,
@@ -82,10 +118,7 @@ class AgroSenseAdvisory(gl.Contract):
             "planting_window": planting_window,
             "weather_context": weather_context,
             "market_context": market_context,
-            "weather_url": weather_url,
-            "market_url": market_url,
             "soil_evidence_hash": soil_evidence_hash,
-            "uploaded_evidence_hash": uploaded_evidence_hash,
             "user_observation": user_observation_text,
             "plan_a": backend_proposed_plan_a,
             "plan_b": backend_proposed_plan_b,
@@ -93,10 +126,14 @@ class AgroSenseAdvisory(gl.Contract):
         }
         case_json = json.dumps(case, indent=2, sort_keys=True)
 
+        evidence_section = (
+            "\n\nATTACHED EVIDENCE DOCUMENTS:\n" + document_summary
+        )
+
         # ---------- Stage 1: action token (strict consensus) ----------
         token_prompt = (
             "You are an independent agricultural advisory validator.\n\n"
-            "Case:\n" + case_json + "\n\n"
+            "Case:\n" + case_json + evidence_section + "\n\n"
             "Choose the MOST DEFENSIBLE single action for the next 7-14 days "
             "from this enum. Return EXACTLY one token, lowercase, no other "
             "characters:\n\n"
@@ -120,7 +157,7 @@ class AgroSenseAdvisory(gl.Contract):
         # ---------- Stage 2: reasoning + risk + confidence (relaxed) ----------
         reason_prompt = (
             "The agreed advisory action is: " + agreed_token + ".\n\n"
-            "Case:\n" + case_json + "\n\n"
+            "Case:\n" + case_json + evidence_section + "\n\n"
             "Produce a concise JSON object describing the verdict. Use these "
             "exact keys:\n"
             "{\n"
@@ -159,19 +196,15 @@ class AgroSenseAdvisory(gl.Contract):
                 "reasoning": (agreed_reason_raw or "")[:280],
             }
 
-        evidence_digest = (
-            "soil:" + (soil_evidence_hash or "")[:12]
-            + "|files:" + (uploaded_evidence_hash or "")[:12]
-        )
-
         stored = {
             "advisory_id": advisory_id,
             "verdict": agreed_token,
-            "risk_level":       parsed.get("risk_level", "moderate"),
-            "confidence_label": parsed.get("confidence", "moderate"),
-            "selected_plan":    parsed.get("selected_plan", "B"),
+            "risk_level":        parsed.get("risk_level", "moderate"),
+            "confidence_label":  parsed.get("confidence", "moderate"),
+            "selected_plan":     parsed.get("selected_plan", "B"),
             "reasoning_summary": (parsed.get("reasoning") or "")[:400],
-            "evidence_digest": evidence_digest,
+            "evidence_digest":   "soil:" + (soil_evidence_hash or "")[:12]
+                                 + "|manifest:" + evidence_manifest_url[-24:],
             "consensus_timestamp": "",
             "final_status": "consensus_reached",
         }

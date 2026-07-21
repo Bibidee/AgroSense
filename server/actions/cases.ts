@@ -82,13 +82,13 @@ export async function submitToGenLayer(caseId: string, password: string) {
 
   const { data: snaps } = await sb.from("data_snapshots")
     .select("source_type, snapshot_json, snapshot_hash").eq("advisory_case_id", caseId);
-  const { data: ev } = await sb.from("evidence_files")
-    .select("evidence_hash").eq("advisory_case_id", caseId);
 
   const weather = snaps?.find(s => s.source_type === "weather")?.snapshot_json?.text ?? "";
   const market  = snaps?.find(s => s.source_type === "market")?.snapshot_json?.text ?? "";
-  const soilHash   = snaps?.find(s => s.source_type === "soil")?.snapshot_hash ?? sha256Hex("none");
-  const uploadHash = sha256Hex((ev ?? []).map(e => e.evidence_hash).join("|") || "none");
+  const soilHash = snaps?.find(s => s.source_type === "soil")?.snapshot_hash ?? sha256Hex("none");
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://the-agrosense.vercel.app";
+  const evidenceManifestUrl = `${appUrl}/api/evidence/${caseId}`;
 
   const admin = supabaseAdmin();
   await admin.from("contract_activity_logs").insert({
@@ -112,7 +112,7 @@ export async function submitToGenLayer(caseId: string, password: string) {
       weatherUrl: "",
       marketUrl: "",
       soilEvidenceHash: soilHash,
-      uploadedEvidenceHash: uploadHash,
+      evidenceManifestUrl: evidenceManifestUrl,
       userObservationText: c.user_observation ?? "",
       backendProposedPlanA: c.proposed_plan_a,
       backendProposedPlanB: c.proposed_plan_b,

@@ -19,7 +19,7 @@ export interface AdvisoryPacket {
   weatherUrl: string;
   marketUrl: string;
   soilEvidenceHash: string;
-  uploadedEvidenceHash: string;
+  evidenceManifestUrl: string;
   userObservationText: string;
   backendProposedPlanA: string;
   backendProposedPlanB: string;
@@ -31,7 +31,7 @@ export const AGROSENSE_METHODS = {
   submit_advisory: [
     "advisory_id","farm_region","crop_type","advisory_question","planting_window",
     "weather_context","market_context","weather_url","market_url",
-    "soil_evidence_hash","uploaded_evidence_hash","user_observation_text",
+    "soil_evidence_hash","evidence_manifest_url","user_observation_text",
     "backend_proposed_plan_a","backend_proposed_plan_b","backend_proposed_plan_c",
   ],
   get_verdict: ["advisory_id"],
@@ -85,7 +85,7 @@ export async function submitAdvisoryToGenLayer(
     packet.advisoryId, packet.farmRegion, packet.cropType, packet.advisoryQuestion,
     packet.plantingWindow, packet.weatherContext, packet.marketContext,
     packet.weatherUrl, packet.marketUrl,
-    packet.soilEvidenceHash, packet.uploadedEvidenceHash, packet.userObservationText,
+    packet.soilEvidenceHash, packet.evidenceManifestUrl, packet.userObservationText,
     packet.backendProposedPlanA, packet.backendProposedPlanB, packet.backendProposedPlanC,
   ];
   if (args.length !== AGROSENSE_METHODS.submit_advisory.length) {
@@ -120,7 +120,7 @@ export async function submitAdvisoryToGenLayer(
     confidenceLabel:   ready ? v.confidence_label ?? null : null,
     selectedPlan:      ready ? v.selected_plan ?? null : null,
     reasoningSummary:  ready ? v.reasoning_summary ?? null : null,
-    evidenceDigest:    ready ? v.evidence_digest ?? "" : `${packet.soilEvidenceHash.slice(0,12)}|${packet.uploadedEvidenceHash.slice(0,12)}`,
+    evidenceDigest:    ready ? v.evidence_digest ?? "" : `${packet.soilEvidenceHash.slice(0,12)}|manifest`,
     consensusTimestamp: ready ? (v.consensus_timestamp || new Date().toISOString()) : "",
     finalStatus: ready ? "consensus_reached" : "awaiting_consensus",
     transactionHash: txHash,
