@@ -1,7 +1,7 @@
 // Single source of truth for the deployed AgroSenseAdvisory contract.
 export const AGROSENSE_CONTRACT_ADDRESS =
   (process.env.NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS ||
-    "0xCda090b47800Be4EC97EAee540224904A6558070") as `0x${string}`;
+    "0x79d68980436D96Ee489C3b1786A739E2EE41BC73") as `0x${string}`;
 
 export const AGROSENSE_CONTRACT_NETWORK = "GenLayer StudioNet";
 export const AGROSENSE_CHAIN_ID = 61999;
