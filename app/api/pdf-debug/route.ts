@@ -38,7 +38,26 @@ export async function GET() {
     log.push(`buf length: ${buf.length}`);
     log.push(`buf[0..3]: ${[...buf.slice(0, 4)].map((b) => b.toString(16)).join(" ")}`);
 
-    // 2. Try pdf-parse
+    // 2. Try pdf-parse (with polyfill)
+    if (typeof (globalThis as any).DOMMatrix === "undefined") {
+      (globalThis as any).DOMMatrix = class DOMMatrix {
+        a = 1; b = 0; c = 0; d = 1; e = 0; f = 0;
+        constructor(init?: number[]) {
+          if (Array.isArray(init) && init.length === 6) {
+            [this.a, this.b, this.c, this.d, this.e, this.f] = init;
+          }
+        }
+        invertSelf() { return this; }
+        multiplySelf() { return this; }
+        preMultiplySelf() { return this; }
+        translate() { return this; }
+        scale() { return this; }
+        addPath() {}
+      };
+      log.push("DOMMatrix polyfilled");
+    } else {
+      log.push("DOMMatrix already defined");
+    }
     try {
       const { PDFParse } = await import("pdf-parse");
       log.push("PDFParse imported");
