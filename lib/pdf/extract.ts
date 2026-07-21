@@ -1,12 +1,10 @@
 import "server-only";
 
-// pdfjs-dist worker references DOMMatrix at module level (for canvas rendering).
-// In Node.js / Vercel serverless, DOMMatrix is not defined. Polyfill it before
-// any import so the worker loads without throwing. Text extraction doesn't use
-// DOMMatrix at all — it only appears in the canvas rendering path.
+// pdfjs-dist uses DOMMatrix at module level (for canvas rendering — not text extraction).
+// Node.js / Vercel serverless doesn't have DOMMatrix; stub it before any pdfjs import.
 function ensureDOMMatrix() {
   if (typeof globalThis.DOMMatrix !== "undefined") return;
-  // @ts-expect-error — minimal polyfill; full spec not needed for text extraction
+  // @ts-expect-error — minimal polyfill; real matrix math not needed for text extraction
   globalThis.DOMMatrix = class DOMMatrix {
     a = 1; b = 0; c = 0; d = 1; e = 0; f = 0;
     m11 = 1; m12 = 0; m13 = 0; m14 = 0;
@@ -32,8 +30,15 @@ function ensureDOMMatrix() {
 export async function extractPdfText(buf: Buffer): Promise<string> {
   ensureDOMMatrix();
   try {
+    // Pre-import the pdfjs worker with a static string so Next.js/Vercel's
+    // file tracer includes it in the function bundle. pdfjs checks
+    // globalThis.pdfjsWorker.WorkerMessageHandler first; if set, it skips its
+    // own runtime dynamic import (which can't resolve after bundling).
+    const pdfjsWorker = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).pdfjsWorker = pdfjsWorker;
+
     const { PDFParse } = await import("pdf-parse");
-    PDFParse.setWorker("pdfjs-dist/legacy/build/pdf.worker.mjs");
     const parser = new PDFParse({ data: buf });
     try {
       const result = await parser.getText();

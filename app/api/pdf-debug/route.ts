@@ -7,7 +7,6 @@ export async function GET() {
   const log: string[] = [];
 
   try {
-    // 1. Download the known PDF from Supabase storage
     const admin = supabaseAdmin();
     const { data: files } = await admin
       .from("evidence_files")
@@ -16,57 +15,48 @@ export async function GET() {
       .limit(1);
 
     const f = files?.[0];
-    log.push(`file row: ${JSON.stringify(f)}`);
+    log.push(`file: ${JSON.stringify(f)}`);
 
-    if (!f?.file_path) {
-      return NextResponse.json({ log, error: "no pdf file found" });
-    }
+    if (!f?.file_path) return NextResponse.json({ log, error: "no pdf" });
 
-    const bucket = f.file_bucket || "evidence";
     const { data: blob, error: dlErr } = await admin.storage
-      .from(bucket)
+      .from(f.file_bucket || "evidence")
       .download(f.file_path);
 
-    log.push(`download error: ${dlErr?.message ?? "none"}`);
-    log.push(`blob type: ${blob?.constructor?.name}`);
-
-    if (!blob) {
-      return NextResponse.json({ log, error: "download failed" });
-    }
+    log.push(`dl err: ${dlErr?.message ?? "none"}, buf bytes: ${(await blob?.arrayBuffer())?.byteLength ?? 0}`);
+    if (!blob) return NextResponse.json({ log, error: "download failed" });
 
     const buf = Buffer.from(await blob.arrayBuffer());
-    log.push(`buf length: ${buf.length}`);
-    log.push(`buf[0..3]: ${[...buf.slice(0, 4)].map((b) => b.toString(16)).join(" ")}`);
+    log.push(`buf: ${buf.length} bytes, header: ${[...buf.slice(0, 4)].map(b => b.toString(16)).join(" ")}`);
 
-    // 2. Try pdf-parse (with polyfill)
+    // DOMMatrix polyfill
     if (typeof (globalThis as any).DOMMatrix === "undefined") {
       (globalThis as any).DOMMatrix = class DOMMatrix {
-        a = 1; b = 0; c = 0; d = 1; e = 0; f = 0;
-        constructor(init?: number[]) {
-          if (Array.isArray(init) && init.length === 6) {
-            [this.a, this.b, this.c, this.d, this.e, this.f] = init;
-          }
-        }
-        invertSelf() { return this; }
-        multiplySelf() { return this; }
-        preMultiplySelf() { return this; }
-        translate() { return this; }
-        scale() { return this; }
-        addPath() {}
+        a=1;b=0;c=0;d=1;e=0;f=0;m11=1;m12=0;m21=0;m22=1;m41=0;m42=0;is2D=true;isIdentity=true;
+        constructor(init?: number[]) { if (Array.isArray(init) && init.length===6) { [this.a,this.b,this.c,this.d,this.e,this.f]=init; } }
+        invertSelf(){return this;} multiplySelf(){return this;} preMultiplySelf(){return this;}
+        translate(){return this;} scale(){return this;} addPath(){}
       };
-      log.push("DOMMatrix polyfilled");
+      log.push("DOMMatrix: polyfilled");
     } else {
-      log.push("DOMMatrix already defined");
+      log.push("DOMMatrix: already present");
     }
+
+    // Pre-load worker so pdfjs uses globalThis.pdfjsWorker instead of string-import
+    try {
+      const w = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
+      (globalThis as any).pdfjsWorker = w;
+      log.push(`worker loaded, keys: ${Object.keys(w).join(",")}`);
+    } catch (e: unknown) {
+      log.push(`worker load failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
     try {
       const { PDFParse } = await import("pdf-parse");
       log.push("PDFParse imported");
-      PDFParse.setWorker("pdfjs-dist/legacy/build/pdf.worker.mjs");
-      log.push("worker set");
       const parser = new PDFParse({ data: buf });
-      log.push("parser created");
       const result = await parser.getText();
-      log.push(`getText done, text length: ${result.text?.length}, pages: ${result.total}`);
+      log.push(`text length: ${result.text?.length}, pages: ${result.total}`);
       await parser.destroy().catch(() => {});
       return NextResponse.json({ log, text: result.text?.slice(0, 500) });
     } catch (e: unknown) {
@@ -75,8 +65,6 @@ export async function GET() {
       return NextResponse.json({ log, error: err });
     }
   } catch (e: unknown) {
-    const err = e instanceof Error ? e.message : String(e);
-    log.push(`outer error: ${err}`);
-    return NextResponse.json({ log, error: err });
+    return NextResponse.json({ log, error: e instanceof Error ? e.message : String(e) });
   }
 }
